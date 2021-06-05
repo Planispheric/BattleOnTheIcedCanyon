@@ -1,0 +1,152 @@
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+-----------------------------------------------------------------------------------------------------------------
+local ZoomedInFov = 0
+local ZoomedInSensitivity = 0/80
+-----------------------------------------------------------------------------------------------------------------
+-- Variables
+-----------------------------------------------------------------------------------------------------------------
+local Tool = script.Parent
+local Handle = Tool:WaitForChild("Handle")
+local Players = game:GetService("Players")
+local Player = Players.LocalPlayer
+local UserInputService = game:GetService("UserInputService")
+local MouseEvent = Tool:WaitForChild("MouseEvent")
+local UI = Player:WaitForChild("PlayerGui")
+local AmmoUI = UI:WaitForChild("GunAmmo")
+local Mouse = nil
+local ExpectingInput = false
+local Camera = workspace.CurrentCamera
+local FirePointObject = Handle:WaitForChild("GunFirePoint")
+OriginalSensitivity = UserInputService.MouseDeltaSensitivity
+OriginalFOV = 80
+local IsMouseDown = false
+local ShootBarTweenInfo = TweenInfo.new(
+	0.07,
+	Enum.EasingStyle.Cubic,
+	Enum.EasingDirection.In,
+	0,
+	false,
+	0
+)
+local ReloadBarTweenInfo = TweenInfo.new(
+	0.8,
+	Enum.EasingStyle.Circular,
+	Enum.EasingDirection.In,
+	0,
+	false,
+	0
+)
+function UpdateMouseIcon()
+	if Mouse and not Tool.Parent:IsA("Backpack") then
+		Mouse.Icon = "rbxassetid://6825500735"
+	end
+end
+-----------------------------------------------------------------------------------------------------------------
+-- Functions
+-----------------------------------------------------------------------------------------------------------------
+function OnEquipped(playerMouse)
+	Mouse = playerMouse
+	ExpectingInput = true
+	IsMouseDown = false
+	UpdateMouseIcon()
+	AmmoUI.Enabled = true
+	local AmmoLeft = script:WaitForChild("AmmoLeft").Value
+	local MaxAmmo = script:WaitForChild("MaxAmmo").Value
+	AmmoUI.Frame.AmmoNumber.Text = ""..script:WaitForChild("AmmoLeft").Value.." / "..script:WaitForChild("MaxAmmo").Value..""
+	AmmoUI.Frame.BarBackground.AmmoBar.Size = UDim2.new(AmmoLeft/MaxAmmo,0,1,0)
+	local Character = Player.Character
+	Humanoid = Character:FindFirstChild("Humanoid")
+end
+function OnUnequipped()
+	ExpectingInput = false
+	IsMouseDown = false
+	UserInputService.MouseDeltaSensitivity = 1
+	workspace.CurrentCamera.FieldOfView = 80
+	Player.CameraMode = Enum.CameraMode.Classic
+	UpdateMouseIcon()
+	AmmoUI.Enabled = false
+end
+Tool.Equipped:Connect(OnEquipped)
+Tool.Unequipped:Connect(OnUnequipped)
+UserInputService.InputBegan:Connect(function (input, gameHandledEvent)
+	if gameHandledEvent or not ExpectingInput then
+		return
+	end
+	if input.UserInputType == Enum.UserInputType.MouseButton1 and Mouse ~= nil then
+		IsMouseDown = true
+	end
+end)
+UserInputService.InputEnded:Connect(function (input, gameHandledEvent)
+	if gameHandledEvent or not ExpectingInput then
+		return
+	end
+	if input.UserInputType == Enum.UserInputType.MouseButton1 and Mouse ~= nil then
+		IsMouseDown = false
+	end
+end)
+game:GetService("RunService").Stepped:Connect(function ()
+	if IsMouseDown then
+		MouseEvent:FireServer(Mouse.Hit.Position)
+	end
+end)
+script:WaitForChild("AmmoLeft").Changed:Connect(function()
+	AmmoUI.Frame.AmmoNumber.Text = ""..script:WaitForChild("AmmoLeft").Value.." / "..script:WaitForChild("MaxAmmo").Value..""
+	local AmmoLeft = script:WaitForChild("AmmoLeft").Value
+	local MaxAmmo = script:WaitForChild("MaxAmmo").Value
+	local tweenprop = {
+		Size = UDim2.new(AmmoLeft/MaxAmmo,0,1,0)
+	}
+	local tween = TweenService:Create(AmmoUI.Frame.BarBackground.AmmoBar,ShootBarTweenInfo,tweenprop)
+	tween:Play()
+end)
+UserInputService.InputBegan:Connect(function(input)
+	if Tool.Parent:IsA("Model") then
+		if input.KeyCode == Enum.KeyCode.Q or input.UserInputType == Enum.UserInputType.MouseButton2 then
+			UserInputService.MouseDeltaSensitivity = ZoomedInSensitivity
+			workspace.CurrentCamera.FieldOfView = ZoomedInFov
+			Player.CameraMode = Enum.CameraMode.LockFirstPerson
+			local ZoomAnim = script.Parent.PistolAnimate:FindFirstChild("ZoomAnim")
+			LoadedZoomAnim = Humanoid:LoadAnimation(ZoomAnim)
+			if LoadedZoomAnim ~= nil then
+				LoadedZoomAnim:Play()
+			end
+		end
+	end
+end)
+UserInputService.InputBegan:Connect(function(input)
+	if Tool.Parent:IsA("Model") then
+		if input.KeyCode == Enum.KeyCode.R then
+			ClientReload()
+		end
+	end
+end)
+UserInputService.InputEnded:Connect(function(input)
+	if input.KeyCode == Enum.KeyCode.Q or input.UserInputType == Enum.UserInputType.MouseButton2 then
+		UserInputService.MouseDeltaSensitivity = 1
+workspace.CurrentCamera.FieldOfView = OriginalFOV
+		Player.CameraMode = Enum.CameraMode.Classic
+		if LoadedZoomAnim ~= nil then
+			LoadedZoomAnim:Stop()
+		end
+	end
+end)
+function ClientReload()
+	script.ServerReload:FireServer()
+	UserInputService.MouseDeltaSensitivity = 1
+	workspace.CurrentCamera.FieldOfView = 80
+	Player.CameraMode = Enum.CameraMode.Classic
+	if LoadedZoomAnim ~= nil then
+		LoadedZoomAnim:Stop()
+	end
+	local AmmoLeft = script:WaitForChild("AmmoLeft").Value
+	local MaxAmmo = script:WaitForChild("MaxAmmo").Value
+	local tweenprop = {
+		Size = UDim2.new(1,0,1,0)
+	}
+	local tween = TweenService:Create(AmmoUI.Frame.BarBackground.AmmoBar,ReloadBarTweenInfo,tweenprop)
+	tween:Play()
+end
+script.ClientReload.OnClientEvent:Connect(function()
+	ClientReload()
+end)
