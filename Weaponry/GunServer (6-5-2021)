@@ -1,0 +1,235 @@
+local localplr = script.Parent.Parent.Parent
+local plrs = game:GetService("Players")
+---------------------------------------------------------------------------------------------------------------------
+-- Customization Settings
+---------------------------------------------------------------------------------------------------------------------
+local maxshots = 6
+local dmg = 16
+local DEBUG = false	
+local BULLET_SPEED = 600						
+local BULLET_MAXDIST = 10000							
+local BULLET_GRAVITY = Vector3.new(0, 0, 0)		
+local MIN_BULLET_SPREAD_ANGLE = 0					
+local MAX_BULLET_SPREAD_ANGLE = 0					
+local FIRE_DELAY = .35							
+local BULLETS_PER_SHOT = 1						
+local PIERCE_DEMO = true
+---------------------------------------------------------------------------------------------------------------------
+-- Local Variables
+---------------------------------------------------------------------------------------------------------------------
+local shotsleft = maxshots
+local Tool = script.Parent
+local Handle = Tool.Handle
+local MouseEvent = Tool.MouseEvent
+local FirePointObject = Handle.GunFirePoint
+local FastCast = require(Tool.FastCastRedux)
+local FireSound = Handle.Fire
+local ImpactParticle = Handle.ImpactParticle
+local Debris = game:GetService("Debris")
+local table = require(Tool.FastCastRedux.Table)
+local PartCacheModule = require(Tool.PartCache)
+script.Parent.Client.MaxAmmo.Value = maxshots
+script.Parent.Client.AmmoLeft.Value = shotsleft
+local CanFire = true	
+local reloading = false
+local RNG = Random.new()
+local TAU = math.pi * 2	
+FastCast.DebugLogging = DEBUG
+FastCast.VisualizeCasts = DEBUG
+---------------------------------------------------------------------------------------------------------------------
+-- Bullet Customization
+---------------------------------------------------------------------------------------------------------------------
+local CosmeticBulletsFolder = workspace:FindFirstChild("CosmeticBulletsFolder") or Instance.new("Folder", workspace)
+CosmeticBulletsFolder.Name = "CosmeticBulletsFolder"
+local Caster = FastCast.new()
+local CosmeticBullet = Instance.new("Part")
+local at = Instance.new("Attachment",CosmeticBullet)
+at.Position = Vector3.new(0,.1,0)
+local at2 = Instance.new("Attachment",CosmeticBullet)
+at2.Position = Vector3.new(0,-0.1,0)
+local trail = Instance.new("Trail",CosmeticBullet)
+trail.Attachment0 = at
+trail.Attachment1 = at2
+trail.Transparency = NumberSequence.new(.5,.9,1)
+trail.WidthScale = NumberSequence.new(1,0)
+local spheremesh = Instance.new("SpecialMesh",CosmeticBullet)
+spheremesh.MeshType=Enum.MeshType.Sphere
+CosmeticBullet.Material = Enum.Material.Neon
+CosmeticBullet.Color = Color3.fromRGB(0, 196, 255)
+CosmeticBullet.CanCollide = false
+CosmeticBullet.Anchored = true
+CosmeticBullet.Size = Vector3.new(.2,.2,3)
+trail.Lifetime=0.05
+trail.LightEmission=500
+trail.Color = ColorSequence.new(Color3.fromRGB(0, 196, 255),Color3.fromRGB(150, 196, 255))
+trail.MaxLength=3
+---------------------------------------------------------------------------------------------------------------------
+-- Raycast Parameters
+---------------------------------------------------------------------------------------------------------------------
+local CastParams = RaycastParams.new()
+CastParams.IgnoreWater = true
+CastParams.FilterType = Enum.RaycastFilterType.Blacklist
+CastParams.FilterDescendantsInstances = {}
+local CosmeticPartProvider = PartCacheModule.new(CosmeticBullet, 100, CosmeticBulletsFolder)
+local CastBehavior = FastCast.newBehavior()
+CastBehavior.RaycastParams = CastParams
+CastBehavior.MaxDistance = BULLET_MAXDIST
+CastBehavior.HighFidelityBehavior = FastCast.HighFidelityBehavior.Default
+CastBehavior.CosmeticBulletProvider = CosmeticPartProvider 
+CastBehavior.CosmeticBulletContainer = CosmeticBulletsFolder
+CastBehavior.Acceleration = BULLET_GRAVITY
+CastBehavior.AutoIgnoreContainer = false 
+---------------------------------------------------------------------------------------------------------------------
+-- Important Functions
+---------------------------------------------------------------------------------------------------------------------
+function Reload()
+	if reloading == false then
+		reloading=true
+		local anim = script.Parent.Parent.Humanoid:LoadAnimation(script.Parent.PistolAnimate.ReloadAnim)
+		anim:Play()
+		wait(0.6)
+		script.Parent.Handle.Reload:Play()
+		wait(script.Parent.Handle.Reload.TimeLength + 0.1)
+		shotsleft = maxshots
+		script.Parent.Client.AmmoLeft.Value = shotsleft
+		reloading=false
+	end
+end
+function PlayFireSound()
+	local NewSound = FireSound:Clone()
+	NewSound.Parent = Handle
+	NewSound:Play()
+	Debris:AddItem(NewSound, NewSound.TimeLength)
+end
+
+script.Parent.Client.ServerReload.OnServerEvent:Connect(function()
+	if shotsleft ~= maxshots then
+		if not reloading then
+			Reload()
+		end
+	end
+end)
+
+function MakeParticleFX(position, normal)
+	local attachment = Instance.new("Attachment")
+	attachment.CFrame = CFrame.new(position, position + normal)
+	attachment.Parent = workspace.Terrain
+	local particle = ImpactParticle:Clone()
+	particle.Parent = attachment
+	Debris:AddItem(attachment, particle.Lifetime.Max) -- Automatically delete the particle effect after its maximum lifetime.
+	particle:Emit(25)
+end
+
+---------------------------------------------------------------------------------------------------------------------
+-- Main
+---------------------------------------------------------------------------------------------------------------------
+
+local function Reflect(surfaceNormal, bulletNormal)
+	return bulletNormal - (2 * bulletNormal:Dot(surfaceNormal) * surfaceNormal)
+end
+
+function CanRayPierce(cast, rayResult, segmentVelocity)
+
+	local hits = cast.UserData.Hits
+	if (hits == nil) then
+		cast.UserData.Hits = 1
+	else
+		cast.UserData.Hits += 1
+	end
+	if (cast.UserData.Hits > 3) then
+		return false
+	end
+	local hitPart = rayResult.Instance
+	if hitPart ~= nil and hitPart.Parent ~= nil then
+		local humanoid = hitPart.Parent:FindFirstChild("Humanoid")
+		if humanoid then
+			local chr = humanoid.Parent
+			local plrhit = plrs:GetPlayerFromCharacter(chr)
+			if plrhit == nil then
+				humanoid:TakeDamage(dmg) -- Damage.
+			end
+			if plrhit.Team ~= localplr.Team then
+				humanoid:TakeDamage(dmg) -- Damage.
+			else print("Planispheric's AntiTK Activated:"..localplr.Name.." cannot attack "..chr.Name.. "because they are both on"..localplr.Team.Name..".") end
+		end
+	end
+
+	return true
+
+end
+
+function Fire(direction)
+	if not reloading then
+		if shotsleft > 0 then
+			if Tool.Parent:IsA("Backpack") then return end -- Can't fire if it's not equipped.
+
+			local directionalCF = CFrame.new(Vector3.new(), direction)
+			local direction = (directionalCF * CFrame.fromOrientation(0, 0, RNG:NextNumber(0, TAU)) * CFrame.fromOrientation(math.rad(RNG:NextNumber(MIN_BULLET_SPREAD_ANGLE, MAX_BULLET_SPREAD_ANGLE)), 0, 0)).LookVector
+
+			local humanoidRootPart = Tool.Parent:WaitForChild("HumanoidRootPart", 1)
+			local myMovementSpeed = humanoidRootPart.Velocity							
+			local modifiedBulletSpeed = (direction * BULLET_SPEED)
+
+			if PIERCE_DEMO then
+				CastBehavior.CanPierceFunction = CanRayPierce
+			end
+
+			local simBullet = Caster:Fire(FirePointObject.WorldPosition, direction, modifiedBulletSpeed, CastBehavior)
+			PlayFireSound()
+			shotsleft -= 1
+			script.Parent.Client.AmmoLeft.Value = shotsleft
+		else
+			script.Parent.Client.ClientReload:FireClient(localplr)
+		end
+	end
+end
+
+---------------------------------------------------------------------------------------------------------------------
+-- Events
+---------------------------------------------------------------------------------------------------------------------
+
+function OnRayPierced(cast, raycastResult, segmentVelocity, cosmeticBulletObject)
+	local position = raycastResult.Position
+	local normal = raycastResult.Normal
+
+	local newNormal = Reflect(normal, segmentVelocity.Unit)
+	cast:SetVelocity(newNormal * segmentVelocity.Magnitude)
+	cast:SetPosition(position)
+end
+function OnRayUpdated(cast, segmentOrigin, segmentDirection, length, segmentVelocity, cosmeticBulletObject)
+	if cosmeticBulletObject == nil then return end
+	local bulletLength = cosmeticBulletObject.Size.Z / 2
+	local baseCFrame = CFrame.new(segmentOrigin, segmentOrigin + segmentDirection)
+	cosmeticBulletObject.CFrame = baseCFrame * CFrame.new(0, 0, -(length - bulletLength))
+end
+function OnRayTerminated(cast)
+	local cosmeticBullet = cast.RayInfo.CosmeticBulletObject
+	if cosmeticBullet ~= nil then
+		if CastBehavior.CosmeticBulletProvider ~= nil then
+			CastBehavior.CosmeticBulletProvider:ReturnPart(cosmeticBullet)
+		else
+			cosmeticBullet:Destroy()
+		end
+	end
+end
+MouseEvent.OnServerEvent:Connect(function (clientThatFired, mousePoint)
+	if not CanFire then
+		return
+	end
+	CanFire = false
+	local mouseDirection = (mousePoint - FirePointObject.WorldPosition).Unit
+	if shotsleft > 0 then
+		script.Parent.Handle.GunFirePoint.Emitter:Emit(20)
+	end
+	for i = 1, BULLETS_PER_SHOT do
+		Fire(mouseDirection)
+	end
+	if FIRE_DELAY > 0.03 then wait(FIRE_DELAY) end
+	CanFire = true
+end)
+Caster.RayPierced:Connect(OnRayPierced)
+Caster.LengthChanged:Connect(OnRayUpdated)
+Caster.CastTerminating:Connect(OnRayTerminated)
+Tool.Equipped:Connect(function ()
+	CastParams.FilterDescendantsInstances = {Tool.Parent, CosmeticBulletsFolder}
+end)
